@@ -174,8 +174,10 @@ def bridge_from_sepolia_to_scroll(private_key, log):
         gas_cost = gas_price * gas
         value = value - gas_cost
         contract = web3.eth.contract(address=SEPOLIA_CHAIN['scroll bridge'], abi=scroll_abi)
-
-        contract_txn = contract.functions.depositETH(int(value - Web3.to_wei(0.01, 'ether')), 168000).build_transaction(
+        amount_out = int(value - Web3.to_wei(fees, 'ether'))
+        if amount_out < 0:
+            log.info(f'Сумма бля bridge < 0, наверное очень большой Fees')
+        contract_txn = contract.functions.depositETH(amount_out, 168000).build_transaction(
             {
                 'from': address_wallet,
                 'value': value,
@@ -286,7 +288,7 @@ def swap_eth_for_token(private_key, value, log):
             {
                 'from': address_wallet,
                 'nonce': web3.eth.get_transaction_count(address_wallet),
-                'gasPrice': web3.eth.gas_price + Web3.to_wei(1, 'gwei'),
+                'gasPrice': Web3.to_wei(1, 'gwei'),
                 'value': value
             }
         )
@@ -365,7 +367,7 @@ def approve(private_key, chain, token_to_approve, address_to_approve, log, refue
         dick = {
             'from': address_wallet,
             'nonce': nonce,
-            'gasPrice': web3.eth.gas_price + Web3.to_wei(1, 'gwei')
+            'gasPrice': Web3.to_wei(1, 'gwei'),
         }
 
         tx = token_contract.functions.approve(address_to_approve, max_amount).build_transaction(dick)
@@ -486,7 +488,7 @@ def swap_token_for_eth(private_key, log):
             {
                 'from': address_wallet,
                 'nonce': web3.eth.get_transaction_count(address_wallet),
-                'gasPrice': web3.eth.gas_price + Web3.to_wei(1, 'gwei'),
+                'gasPrice': Web3.to_wei(1, 'gwei'),
             }
         )
 
@@ -548,81 +550,6 @@ def swap_token_for_eth(private_key, log):
         return 0
 
 
-def mint_nft(private_key, log):
-    web3 = SCROLL_SEPOLIA_CHAIN['web3']
-    account = web3.eth.account.from_key(private_key)
-    address_wallet = account.address
-    try:
-        abi = js.load(open('./abi/nft_scroll.txt'))
-        address = Web3.to_checksum_address('0x46Ce46951D12710d85bc4FE10BB29c6Ea5012077')
-        contract = web3.eth.contract(address=address, abi=abi)
-        params = (Web3.to_checksum_address('0x65e4e8d7bd50191abfee6e5bcdc4d16ddfe9975e'), 1, [], 1)
-        contract_txn = contract.functions.mint(params).build_transaction(
-            {
-                'from': address_wallet,
-                'nonce': web3.eth.get_transaction_count(address_wallet),
-                'gasPrice': web3.eth.gas_price + Web3.to_wei(1, 'gwei'),
-                'value': Web3.to_wei(0.00035, 'ether')
-            }
-        )
-
-        signed_txn = web3.eth.account.sign_transaction(contract_txn, private_key=private_key)
-        time.sleep(1)
-        tx_hash = web3.eth.send_raw_transaction(signed_txn.rawTransaction)
-        log.info('Отправил транзакцию')
-        tx_receipt = web3.eth.wait_for_transaction_receipt(tx_hash, timeout=600, poll_latency=30)
-        if tx_receipt.status == 1:
-            log.info('Транзакция смайнилась успешно')
-        else:
-            log.info('Транзакция сфейлилась, пытаюсь еще раз')
-            time.sleep(120)
-            return 0
-
-        log.info(f'Mint NFT SCROLL || {SCROLL_SEPOLIA_CHAIN["scan"]}{web3.to_hex(tx_hash)}\n')
-        return 1
-
-    except TransactionNotFound:
-        log.info('Транзакция не смайнилась за долгий промежуток времени, пытаюсь еще раз')
-        time.sleep(120)
-        return 0
-
-    except ConnectionError:
-        log.info('Ошибка подключения к интернету или проблемы с РПЦ')
-        time.sleep(120)
-        return 0
-
-    except Exception as error:
-        log.info('Произошла ошибка')
-        if isinstance(error.args[0], str):
-            if 'is not in the chain after' in error.args[0]:
-                log.info('Транзакция не смайнилась за долгий промежуток времени. Пытаюсь еще раз')
-
-            elif 'execution reverted: !isAllowed' == error.args[0]:
-                log.info('Вы заминтили максимум NFT на аккаунт')
-                return 1
-            else:
-                log.info(error)
-
-        if isinstance(error.args[0], dict):
-            if 'execute this request' in error.args[0]['message']:
-                log.info('Ошибка запроса на RPC, пытаюсь еще раз')
-
-            elif 'insufficient funds' in error.args[0]['message']:
-                log.info('Ошибка, скорее всего нехватает комсы.')
-
-            elif 'max fee per gas' in error.args[0]['message'] or 'gas required exceeds allowance' in error.args[0]['message']:
-                log.info('Ошибка газа, пытаюсь еще раз')
-
-            else:
-                log.info(f'{error}\n')
-
-        else:
-            log.info(f'{error}\n')
-
-        time.sleep(120)
-        return 0
-
-
 def add_liquidity(private_key, log):
     web3 = SCROLL_SEPOLIA_CHAIN['web3']
     account = web3.eth.account.from_key(private_key)
@@ -643,6 +570,17 @@ def add_liquidity(private_key, log):
         amount_out_eth     = quoter_data[0]
         min_amount_out_eth = int(quoter_data[0] - (quoter_data[0] / 100))
         min_amount_out_gho = int(token_balance - (token_balance / 100))
+
+        allowance = token_contract.functions.allowance(address_wallet, SCROLL_SEPOLIA_CHAIN['liquid']).call()
+        if allowance < Web3.to_wei(1000000, 'ether'):
+            log.info('Нужен аппрув, делаю')
+            for _ in range(20):
+                res_ = approve(private_key, SCROLL_SEPOLIA_CHAIN, SCROLL_SEPOLIA_CHAIN['gho'],
+                               SCROLL_SEPOLIA_CHAIN['liquid'], log, None)
+                if res_ == 1:
+                    break
+            time.sleep(15)
+
         deadline = int(time.time()) + 10000
 
         txn_data = router_contract.encodeABI(
@@ -667,7 +605,7 @@ def add_liquidity(private_key, log):
             {
                 'from': address_wallet,
                 'nonce': web3.eth.get_transaction_count(address_wallet),
-                'gasPrice': web3.eth.gas_price + Web3.to_wei(1, 'gwei'),
+                'gasPrice': Web3.to_wei(1, 'gwei'),
                 'value': amount_out_eth
             }
         )

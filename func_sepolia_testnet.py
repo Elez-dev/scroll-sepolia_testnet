@@ -176,7 +176,8 @@ def bridge_from_sepolia_to_scroll(private_key, log):
         contract = web3.eth.contract(address=SEPOLIA_CHAIN['scroll bridge'], abi=scroll_abi)
         amount_out = int(value - Web3.to_wei(fees, 'ether'))
         if amount_out < 0:
-            log.info(f'Сумма бля bridge < 0, наверное очень большой Fees')
+            log.info(f'Сумма для bridge < 0, наверное очень большой Fees')
+            return 0
         contract_txn = contract.functions.depositETH(amount_out, 168000).build_transaction(
             {
                 'from': address_wallet,

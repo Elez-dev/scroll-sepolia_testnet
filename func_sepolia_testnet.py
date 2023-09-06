@@ -600,8 +600,6 @@ def add_liquidity(private_key, log):
                 deadline,
             )]
         )
-        txn_data = txn_data + '00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000412210e8a00000000000000000000000000000000000000000000000000000000'
-
         contract_txn = router_contract.functions.multicall([txn_data]).build_transaction(
             {
                 'from': address_wallet,

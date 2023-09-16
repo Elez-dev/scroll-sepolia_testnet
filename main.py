@@ -23,26 +23,27 @@ if __name__ == '__main__':
         log.addHandler(file_handler)
 
         while keys_list:
-            private_key = keys_list.pop(0)
-            bsc_w3 = ARBITRUM_CHAIN['web3']
-            acc = bsc_w3.eth.account.from_key(private_key)
-            log.info('----------------------------------------------------------------------------')
-            log.info(f'|   Сейчас работает аккаунт - {acc.address}   |')
-            log.info('----------------------------------------------------------------------------\n\n')
+            index =  random.randint(0, len(keys_list) - 1) if rand_keys else 0
+            key = keys_list.pop(index).split('|')
+            private_key = key[0]
+            proxy = key[1] if len(key) > 1 else ''
 
-            if auto_chain is True:
-                start_chain = get_start_chain(private_key, log)
-            else:
-                if chain_bridge == 1:
-                    start_chain = ARBITRUM_CHAIN
-                else:
-                    start_chain = OPTIMISM_CHAIN
+            start_chain, bsc_w3  = get_start_chain(private_key, proxy, log)
+            address = bsc_w3.eth.account.from_key(private_key).address
+            sepolia_w3 = get_chain(SEPOLIA_CHAIN, proxy)
+            scroll_w3 = get_chain(SCROLL_SEPOLIA_CHAIN, proxy)
+
+            location = requests.get('http://jsonip.com', proxies = {type_of_proxy:proxy} if proxy else '' ).json() 
+
+            log.info('---------------------------------------------------------------------------------')
+            log.info(f'| Сейчас работает аккаунт - {address} IP:{location["ip"]}-{location["country"]}  |')
+            log.info('----------------------------------------------------------------------------\n\n')
 
             value_bridge = round(random.uniform(sepolia_eth_min, sepolia_eth_max), sepolia_eth_decimal)
             log.info(f'Bridge from {start_chain["name"]} to Sepolia - {value_bridge} ETH')
 
             for _ in range(RETRY):
-                res_ = get_gas_sepolia(private_key, start_chain, value_bridge, log)
+                res_ = get_gas_sepolia(private_key, address, bsc_w3, start_chain, value_bridge, log)
                 if res_ == 1:
                     break
             if res_ == 0 or res_ == 'error':
@@ -52,7 +53,7 @@ if __name__ == '__main__':
             time.sleep(random.uniform(time_delay_min, time_delay_max))
 
             for _ in range(RETRY):
-                res_ = bridge_from_sepolia_to_scroll(private_key, log)
+                res_ = bridge_from_sepolia_to_scroll(private_key, address, sepolia_w3, log)
                 if res_ == 1:
                     break
             if res_ == 0 or res_ == 'error':
@@ -68,7 +69,7 @@ if __name__ == '__main__':
 
                 value = round(random.uniform(value_swap_min, value_swap_max), value_swap_decimal)
                 for _ in range(RETRY):
-                    res_ = swap_eth_for_token(private_key, value, log)
+                    res_ = swap_eth_for_token(private_key, address, scroll_w3, value, log)
                     if res_ == 1 or res_ == 'balance':
                         break
                 if res_ == 'balance':
@@ -77,7 +78,7 @@ if __name__ == '__main__':
                 time.sleep(random.uniform(time_delay_min, time_delay_max))
 
                 for _ in range(RETRY):
-                    res_ = swap_token_for_eth(private_key, log)
+                    res_ = swap_token_for_eth(private_key, address, scroll_w3, log)
                     if res_ == 1 or res_ == 'balance':
                         break
                 if res_ == 'balance':
@@ -88,7 +89,7 @@ if __name__ == '__main__':
             log.info('Buy GHO Uniswap\n')
             value = round(random.uniform(value_liquid_min, value_liquid_max), value_liquid_decimal)
             for _ in range(RETRY):
-                res_ = swap_eth_for_token(private_key, value, log)
+                res_ = swap_eth_for_token(private_key, address, scroll_w3, value, log)
                 if res_ == 1 or res_ == 'balance':
                     break
             if res_ == 'balance':
@@ -98,7 +99,7 @@ if __name__ == '__main__':
 
             log.info('Add liquidity Uniswap\n')
             for _ in range(RETRY):
-                res_ = add_liquidity(private_key, log)
+                res_ = add_liquidity(private_key, address, scroll_w3, log)
                 if res_ == 1 or res_ == 'balance':
                     break
             if res_ == 'balance':

@@ -7,7 +7,6 @@ from settings import *
 
 TIME_TRANSACTION = 300
 
-
 def check_stargate(hash_, log):
     try:
         url_ = 'https://api-mainnet.layerzero-scan.com/tx/' + hash_
@@ -27,27 +26,36 @@ def check_stargate(hash_, log):
         return 1
 
 
-def get_start_chain(private_key, log, retry=0):
+def get_start_chain(private_key, proxy, log, retry=0):
     try:
-        web3_arb = ARBITRUM_CHAIN['web3']
-        web3_opt = OPTIMISM_CHAIN['web3']
-        account = web3_opt.eth.account.from_key(private_key)
-        address_wallet = account.address
-        balance_arb = web3_arb.eth.get_balance(address_wallet)
-        balance_opt = web3_opt.eth.get_balance(address_wallet)
-        if balance_arb > balance_opt:
-            chain = ARBITRUM_CHAIN
+        if auto_chain is True:
+            web3_arb = get_chain(ARBITRUM_CHAIN, proxy)
+            web3_opt = get_chain(OPTIMISM_CHAIN, proxy)
+            address_wallet = web3_opt.eth.account.from_key(private_key).address
+            balance_arb = web3_arb.eth.get_balance(address_wallet)
+            balance_opt = web3_opt.eth.get_balance(address_wallet)
+            if balance_arb > balance_opt:
+                chain = ARBITRUM_CHAIN
+                web3 = web3_arb
+            else:
+                chain = OPTIMISM_CHAIN
+                web3 = web3_opt
         else:
-            chain = OPTIMISM_CHAIN
+            if chain_bridge == 1:
+                chain = ARBITRUM_CHAIN
+                web3 = get_chain(ARBITRUM_CHAIN, proxy)
+            else:
+                chain = OPTIMISM_CHAIN
+                web3 = get_chain(OPTIMISM_CHAIN, proxy)
         log.info(f'Стартовая сеть - {chain["name"]}\n')
-        return chain
+        return chain, web3
     except ConnectionError:
         log.info('Ошибка подключения к интернету или проблемы с РПЦ')
         time.sleep(120)
         if retry > 30:
             return 0
         retry += 1
-        get_start_chain(private_key, log, retry)
+        get_start_chain(private_key, proxy, log, retry)
 
     except Exception as error:
         if isinstance(error.args[0], dict):
@@ -59,13 +67,10 @@ def get_start_chain(private_key, log, retry=0):
         if retry > 30:
             return 0
         retry += 1
-        get_start_chain(private_key, log, retry)
+        get_start_chain(private_key, proxy, log, retry)
 
 
-def get_gas_sepolia(private_key, chain, amount, log):
-    web3 = chain['web3']
-    account = web3.eth.account.from_key(private_key)
-    address_wallet = account.address
+def get_gas_sepolia(private_key, address_wallet, web3, chain, amount, log):
     try:
         if amount > 0.1:
             amount = 0.1
@@ -160,10 +165,7 @@ def check_status_bridge(tx_hash, log):
         return 1
 
 
-def bridge_from_sepolia_to_scroll(private_key, log):
-    web3 = SEPOLIA_CHAIN['web3']
-    account = web3.eth.account.from_key(private_key)
-    address_wallet = account.address
+def bridge_from_sepolia_to_scroll(private_key, address_wallet, web3, log):
     try:
         balance_sepolia = web3.eth.get_balance(address_wallet)
         value = int(balance_sepolia * deposit_from_sepolia_to_scroll)
@@ -246,10 +248,7 @@ def bridge_from_sepolia_to_scroll(private_key, log):
         return 0
 
 
-def swap_eth_for_token(private_key, value, log):
-    web3 = SCROLL_SEPOLIA_CHAIN['web3']
-    account = web3.eth.account.from_key(private_key)
-    address_wallet = account.address
+def swap_eth_for_token(private_key, address_wallet, web3, value, log):
     try:
         value = Web3.to_wei(value, 'ether')
         balance = web3.eth.get_balance(address_wallet)
@@ -351,10 +350,7 @@ def swap_eth_for_token(private_key, value, log):
         return 0
 
 
-def approve(private_key, chain, token_to_approve, address_to_approve, log, refuel_chain):
-    web3 = chain['web3']
-    account = web3.eth.account.from_key(private_key)
-    address_wallet = account.address
+def approve(private_key, address_wallet, web3, chain, token_to_approve, address_to_approve, log, refuel_chain):
     try:
         abi = js.load(open('./abi/Token.txt'))
         token_contract = web3.eth.contract(address=token_to_approve, abi=abi)
@@ -433,10 +429,7 @@ def approve(private_key, chain, token_to_approve, address_to_approve, log, refue
         return 0
 
 
-def swap_token_for_eth(private_key, log):
-    web3 = SCROLL_SEPOLIA_CHAIN['web3']
-    account = web3.eth.account.from_key(private_key)
-    address_wallet = account.address
+def swap_token_for_eth(private_key, address_wallet, web3, log):
     try:
         quoter_abi = js.load(open('./abi/quoter.txt'))
         router_abi = js.load(open('./abi/router.txt'))
@@ -478,7 +471,7 @@ def swap_token_for_eth(private_key, log):
         if allowance < Web3.to_wei(1000000, 'ether'):
             log.info('Нужен аппрув, делаю')
             for _ in range(20):
-                res_ = approve(private_key, SCROLL_SEPOLIA_CHAIN, SCROLL_SEPOLIA_CHAIN['gho'],
+                res_ = approve(private_key, address_wallet, web3, SCROLL_SEPOLIA_CHAIN, SCROLL_SEPOLIA_CHAIN['gho'],
                                SCROLL_SEPOLIA_CHAIN['router'], log, None)
                 if res_ == 1:
                     break
@@ -551,10 +544,7 @@ def swap_token_for_eth(private_key, log):
         return 0
 
 
-def add_liquidity(private_key, log):
-    web3 = SCROLL_SEPOLIA_CHAIN['web3']
-    account = web3.eth.account.from_key(private_key)
-    address_wallet = account.address
+def add_liquidity(private_key, address_wallet, web3, log):
     try:
         quoter_abi = js.load(open('./abi/quoter.txt'))
         liquid = js.load(open('./abi/liquid.txt'))
@@ -576,7 +566,7 @@ def add_liquidity(private_key, log):
         if allowance < Web3.to_wei(1000000, 'ether'):
             log.info('Нужен аппрув, делаю')
             for _ in range(20):
-                res_ = approve(private_key, SCROLL_SEPOLIA_CHAIN, SCROLL_SEPOLIA_CHAIN['gho'],
+                res_ = approve(private_key, address_wallet, web3, SCROLL_SEPOLIA_CHAIN, SCROLL_SEPOLIA_CHAIN['gho'],
                                SCROLL_SEPOLIA_CHAIN['liquid'], log, None)
                 if res_ == 1:
                     break
